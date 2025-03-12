@@ -1,0 +1,133 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
+
+
+# Paramètres du problème
+Nb_particule = 50
+W = 3
+L = 1
+k_in = 25
+N_x = 100
+N_y = 300
+
+pas_x = L / N_x
+pas_y = W / N_y
+
+alpha = 4 * 1j / k_in
+
+# Champ incident vu par une particule : on considère uniquement la coordonnée x (onde plane orthogonalement incidente a la grille)
+def champ_ini(x):
+    return np.exp(1j * k_in * x)
+
+
+
+
+
+def creation_grille_avec_points_aleat():
+    x = np.linspace(0, L, N_x)
+    y = np.linspace(0, W, N_y)
+    X, Y = np.meshgrid(x, y)
+    X_flat = X.flatten()
+    Y_flat = Y.flatten()
+    total_points = len(X_flat)
+    # choix aleatoire des positions des particules sur la grille 
+    indices = np.random.choice(total_points, Nb_particule, replace=False)
+    X_random = X_flat[indices]
+    Y_random = Y_flat[indices]
+    # Affichage de la grille avec les points choisis 
+    plt.figure(figsize=(6, 3))
+    plt.plot(X, Y, 'b.', markersize=2)
+    plt.plot(X_random, Y_random, 'ro', markersize=3)
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title('Grille avec {} points aléatoires'.format(Nb_particule))
+    plt.show()
+    return X_random, Y_random
+
+
+
+
+
+
+def green_function(r, r_prime, k0):
+    # r sera utilisé comme r_obs cad la position ou le champ total issu du rayonnement de tous les dipoles sera observé
+    # r_prime sera utilisé comme la position de la particule numero j dans le calcul du champ total
+    R = np.linalg.norm(np.array(r) - np.array(r_prime))
+    if R < 1e-8:
+        return 0.0  # Évite le souci si R = 0 
+    return np.exp(1j * k0 * R) / (4 * np.pi * R)
+
+
+
+
+
+if __name__ == '__main__':
+    # Récupération des positions aléatoires
+    X_random, Y_random = creation_grille_avec_points_aleat()
+    
+    # Calcul du champ incident pour chaque particule en fonction de leur coordonnée x
+    E0 = np.array([champ_ini(x) for x in X_random])
+    
+    # aonstruction de la matrice d'interaction A
+    A = np.zeros((Nb_particule, Nb_particule), dtype=complex)
+    for j in range(Nb_particule):
+        for k in range(Nb_particule):
+        #cas ou ya un souci (voir def de green function)
+            if j == k:
+                A[j, k] = 0
+            else:
+                A[j, k] = k_in**2 * alpha * green_function((X_random[j], Y_random[j]), 
+                                                           (X_random[k], Y_random[k]), k_in)
+    
+    I = np.eye(Nb_particule, dtype=complex)
+    M = I - A
+    E = np.linalg.solve(M, E0)
+    
+    # affichage du champ perçu par les particules  
+    plt.figure()
+    scatter = plt.scatter(X_random, Y_random, c=np.angle(E), cmap='hsv', s=50, vmin=-np.pi, vmax=np.pi)
+    cbar = plt.colorbar(scatter, ticks=[-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
+    cbar.ax.set_yticklabels([r'$-\pi$', r'$-\pi/2$', r'$0$', r'$\pi/2$', r'$\pi$'])
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title("Champ E (phase) vu par chaque particule")
+    plt.show()
+    
+    # Calcul du champ total résultant de l'interaction onde/particules
+    N_obs_x = 100  # points d'observation en x, depend de l'espace ou on regarde E_ray
+    N_obs_y = 300  # points d'observation en y, depend de l'espace ou on regarde E_ray
+    x_obs = np.linspace(-1*L, 2*L, N_obs_x)
+    y_obs = np.linspace(-1*W, 2*W, N_obs_y)
+    X_obs, Y_obs = np.meshgrid(x_obs, y_obs)
+    
+    
+    #crée matrice vide pour le champ final de taille correspondante au nb de points d'observation N_obs_x*N_obs_y
+    E_total = np.zeros_like(X_obs, dtype=complex)
+    
+    
+    #pour chaque point d'observation, calcul du champ total
+    for i in range(N_obs_y):
+        for j in range(N_obs_x):
+            r_obs = (X_obs[i, j], Y_obs[i, j])
+            # Ici le champ incident ne dépend que de x
+            E0_r = champ_ini(r_obs[0])
+            somme = 0.0 + 0.0j
+            for idx in range(Nb_particule):
+                r_part = (X_random[idx], Y_random[idx])
+                somme += green_function(r_obs, r_part, k_in) * E[idx]
+            E_total[i, j] = E0_r + k_in**2 * alpha * somme
+
+    I_total = np.abs(E_total)**2
+    
+    # affichage de la carte d'intensité en echelle log
+plt.figure(figsize=(8, 6))
+plt.imshow(I_total, extent=[-1*L, 2*L, -1*W, 2*W], origin='lower', cmap='inferno',
+           aspect='auto', norm=LogNorm(vmin=I_total[I_total>0].min(), vmax=np.max(I_total)))
+plt.colorbar(label='Intensité |E|^2 (échelle log)')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.title("Carte d'intensité du champ total (échelle logarithmique)")
+#plt.savefig("Intensity_map_log.pdf")
+plt.show()
+
