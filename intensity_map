@@ -1,133 +1,166 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
+from scipy import special
+import random
 
+random.seed(42)
 
 # Paramètres du problème
-Nb_particule = 50
-W = 3
-L = 1
-k_in = 25
-N_x = 100
-N_y = 300
+Nb_particule = 100      # nombre de particules (scatterers)
+W = 3                   # largeur du milieu
+L = 1                   # longueur du milieu
+k_in = 25               # nombre d'onde incident
+N_x = 100               # nombre de points de discrétisation en x (pour la grille des particules)
+N_y = 300               # nombre de points de discrétisation en y
 
 pas_x = L / N_x
 pas_y = W / N_y
 
-alpha = 4 * 1j / k_in
-
-# Champ incident vu par une particule : on considère uniquement la coordonnée x (onde plane orthogonalement incidente a la grille)
-def champ_ini(x):
-    return np.exp(1j * k_in * x)
-
-
-
-
+alpha = 4 * 1j / (k_in**2)
 
 def creation_grille_avec_points_aleat():
+    """
+    Création d'une grille sur [0,L]x[0,W] et sélection aléatoire Nb_particule de positions.
+    """
     x = np.linspace(0, L, N_x)
     y = np.linspace(0, W, N_y)
     X, Y = np.meshgrid(x, y)
     X_flat = X.flatten()
     Y_flat = Y.flatten()
     total_points = len(X_flat)
-    # choix aleatoire des positions des particules sur la grille 
     indices = np.random.choice(total_points, Nb_particule, replace=False)
     X_random = X_flat[indices]
     Y_random = Y_flat[indices]
-    # Affichage de la grille avec les points choisis 
-    plt.figure(figsize=(6, 3))
-    plt.plot(X, Y, 'b.', markersize=2)
-    plt.plot(X_random, Y_random, 'ro', markersize=3)
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.title('Grille avec {} points aléatoires'.format(Nb_particule))
-    plt.show()
+    # Optionnel : affichage de la grille avec les particules
+    # plt.figure(figsize=(2,6))
+    # plt.plot(X, Y, 'b.', markersize=2)
+    # plt.plot(X_random, Y_random, 'ro', markersize=3)
+    # plt.xlabel('x')
+    # plt.ylabel('y')
+    # plt.title('Grille avec {} points aléatoires'.format(Nb_particule))
+    # plt.show()
     return X_random, Y_random
 
-
-
-
-
-
-def green_function(r, r_prime, k0):
-    # r sera utilisé comme r_obs cad la position ou le champ total issu du rayonnement de tous les dipoles sera observé
-    # r_prime sera utilisé comme la position de la particule numero j dans le calcul du champ total
+def green_function(r, r_prime, k0, eps=1e-9):
     R = np.linalg.norm(np.array(r) - np.array(r_prime))
-    if R < 1e-8:
-        return 0.0  # Évite le souci si R = 0 
-    return np.exp(1j * k0 * R) / (4 * np.pi * R)
+    if R < eps:
+        # Retourne 0 ou une valeur limite (ici on choisit 0)
+        return 0
+    return 1j * special.hankel1(0, k0 * R) / 4
 
+def champ_ini(x, y, thet):
+    """
+    Champ incident défini pour une onde plane d'angle d'incidence thet.
+    """
+    return np.exp(1j * k_in * (np.cos(thet)*x + np.sin(thet)*y))
 
+# Récupération des positions aléatoires des particules
+X_random, Y_random = creation_grille_avec_points_aleat()
 
+# Construction de la matrice A
+A = np.zeros((Nb_particule, Nb_particule), dtype=complex)
+for j in range(Nb_particule):
+    for k in range(Nb_particule):
+        if j == k:
+            A[j, k] = 0
+        else:
+            A[j, k] = k_in**2 * alpha * green_function((X_random[j], Y_random[j]),
+                                                       (X_random[k], Y_random[k]), k_in)
 
+# Définition des angles d'incidence (modes d'entrée)
+theta = np.linspace(-np.pi/5, np.pi/5, num=50)
+N_input = len(theta)  # nombre d'angles d'incidence
+N_output = 300 #(=N_obs_y nombre de pixels de sortie sur le long d'une colonne fixée à x=cte)        # nombre de pixels de sortie dans la TM (sera déterminé par la taille de la ligne extraite)
+TM_pretransposee = []  # transmission matrix
 
-if __name__ == '__main__':
-    # Récupération des positions aléatoires
-    X_random, Y_random = creation_grille_avec_points_aleat()
+# Pour chaque angle d'incidence, on calcule la réponse du système
+for idx, th in enumerate(theta):
+    progress = (idx+1) / len(theta) * 100
+    print(f"Traitement de theta {idx+1}/{len(theta)} : {progress:.1f}% terminé")
+    # calcul du champ incident sur chaque particule 
+    E0 = np.array([champ_ini(x, y, th) for x, y in zip(X_random, Y_random)])
     
-    # Calcul du champ incident pour chaque particule en fonction de leur coordonnée x
-    E0 = np.array([champ_ini(x) for x in X_random])
-    
-    # aonstruction de la matrice d'interaction A
-    A = np.zeros((Nb_particule, Nb_particule), dtype=complex)
-    for j in range(Nb_particule):
-        for k in range(Nb_particule):
-        #cas ou ya un souci (voir def de green function)
-            if j == k:
-                A[j, k] = 0
-            else:
-                A[j, k] = k_in**2 * alpha * green_function((X_random[j], Y_random[j]), 
-                                                           (X_random[k], Y_random[k]), k_in)
-    
+    # resolution du système : (I - A) E = E0
     I = np.eye(Nb_particule, dtype=complex)
     M = I - A
     E = np.linalg.solve(M, E0)
     
-    # affichage du champ perçu par les particules  
-    plt.figure()
-    scatter = plt.scatter(X_random, Y_random, c=np.angle(E), cmap='hsv', s=50, vmin=-np.pi, vmax=np.pi)
-    cbar = plt.colorbar(scatter, ticks=[-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
-    cbar.ax.set_yticklabels([r'$-\pi$', r'$-\pi/2$', r'$0$', r'$\pi/2$', r'$\pi$'])
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.title("Champ E (phase) vu par chaque particule")
-    plt.show()
-    
-    # Calcul du champ total résultant de l'interaction onde/particules
-    N_obs_x = 100  # points d'observation en x, depend de l'espace ou on regarde E_ray
-    N_obs_y = 300  # points d'observation en y, depend de l'espace ou on regarde E_ray
-    x_obs = np.linspace(-1*L, 2*L, N_obs_x)
-    y_obs = np.linspace(-1*W, 2*W, N_obs_y)
+    # calcul champ total émis par les particules en chaque point de l'espace 
+    # grille d'observation
+    # On choisit ici x dans [-L, 2L] et y dans [-L, W+L] pour couvrir la zone réfléchie et transmise
+    N_obs_x = 100
+    N_obs_y = 300
+    x_obs = np.linspace(-L, 2*L, N_obs_x)
+    y_obs = np.linspace(-L, W+L, N_obs_y)
     X_obs, Y_obs = np.meshgrid(x_obs, y_obs)
     
-    
-    #crée matrice vide pour le champ final de taille correspondante au nb de points d'observation N_obs_x*N_obs_y
+    # Calcul du champ total pour chaque point d'observation X_obs, Y_obs
     E_total = np.zeros_like(X_obs, dtype=complex)
-    
-    
-    #pour chaque point d'observation, calcul du champ total
     for i in range(N_obs_y):
         for j in range(N_obs_x):
             r_obs = (X_obs[i, j], Y_obs[i, j])
-            # Ici le champ incident ne dépend que de x
-            E0_r = champ_ini(r_obs[0])
+            E0_r = champ_ini(r_obs[0], r_obs[1], th)
             somme = 0.0 + 0.0j
             for idx in range(Nb_particule):
                 r_part = (X_random[idx], Y_random[idx])
                 somme += green_function(r_obs, r_part, k_in) * E[idx]
             E_total[i, j] = E0_r + k_in**2 * alpha * somme
-
     I_total = np.abs(E_total)**2
     
-    # affichage de la carte d'intensité en echelle log
-plt.figure(figsize=(8, 6))
-plt.imshow(I_total, extent=[-1*L, 2*L, -1*W, 2*W], origin='lower', cmap='inferno',
-           aspect='auto', norm=LogNorm(vmin=I_total[I_total>0].min(), vmax=np.max(I_total)))
-plt.colorbar(label='Intensité |E|^2 (échelle log)')
-plt.xlabel('x')
-plt.ylabel('y')
-plt.title("Carte d'intensité du champ total (échelle logarithmique)")
-#plt.savefig("Intensity_map_log.pdf")
+    # Affichage de la carte d'intensité (pour chaque theta, affichage temporaire)
+    plt.figure(figsize=(3, 5))
+    plt.imshow(I_total, extent=[-L, 2*L, -L, W+L], origin='lower', cmap='inferno',
+               aspect='auto', norm=LogNorm(vmin=I_total[I_total>0].min(), vmax=np.max(I_total)))
+    plt.colorbar(label='Intensité |E|^2 (échelle log)')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title("Champ total (θ = {:.2f} rad)".format(th))
+    # Superposition des positions des particules par des ronds noirs non remplis
+    plt.scatter(X_random, Y_random, facecolors='none', edgecolors='black', s=50, label='Particules')
+    plt.legend()
+    plt.show()
+    
+    
+    # Troncature du champ pour ne récupérer que la sortie à x = 2L (sortie du système)
+    indx = np.argmin(np.abs(x_obs - 2*L))  # index correspondant à x = 2L
+    field_line = E_total[:, indx]  
+    TM_pretransposee.append(field_line) # remplissage de la tm pour toutes les valeurs de theta 
+
+
+# Conversion finale de TM en tableau 2D (dimensions: N_input x N_obs_y)
+TM_pretransposee = np.array(TM_pretransposee)
+TM_pretransposee_conj = TM_pretransposee.conj()
+vraie_TM = TM_pretransposee.T
+print("vraie Transmission Matrix shape:", vraie_TM.shape)
+vraie_TM_dagger = TM_pretransposee_conj
+
+
+
+# champ cible qu'on choisit comme on veut 
+
+desired_output = np.zeros(N_obs_y, dtype=complex)
+for i in range ( 25,50):
+    desired_output[i] = 1.0  # ou une amplitude choisie
+desired_output.reshape(N_obs_y , 1)
+print('shape desired output is : ', desired_output.shape)
+print('forme vraie_tm_dag : ', vraie_TM_dagger.shape )
+
+
+# calcul champ d'entrée (phase conjugation-retour inverse de la lumiere) :
+input_field = np.dot(vraie_TM_dagger, desired_output)  # dimensions : (N_input,)
+
+# (a voir si on implemente modulation d'amplitude  pour l'instant que phase )
+
+phase_input = np.exp(1j * np.angle(input_field))
+focused_output = np.dot(vraie_TM, phase_input)
+
+# Affichage du profil d'intensité le long de la colonne de sortie (indice le long de y)
+plt.figure()
+plt.plot(np.arange(N_obs_y), np.abs(focused_output)**2, 'bo-', label='Intensité focalisée')
+plt.xlabel('Pixel de sortie (indice y)')
+plt.ylabel('Intensité')
+plt.title('Champ de sortie après phase conjugation\n(focalisation sur pixels allant de xxx à yyy)' )
+plt.legend()
 plt.show()
 
