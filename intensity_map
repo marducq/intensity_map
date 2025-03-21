@@ -32,7 +32,7 @@ def creation_grille_avec_points_aleat():
     indices = np.random.choice(total_points, Nb_particule, replace=False)
     X_random = X_flat[indices]
     Y_random = Y_flat[indices]
-    # Optionnel : affichage de la grille avec les particules
+    # affichage de la grille avec les particules
     # plt.figure(figsize=(2,6))
     # plt.plot(X, Y, 'b.', markersize=2)
     # plt.plot(X_random, Y_random, 'ro', markersize=3)
@@ -50,9 +50,9 @@ def green_function(r, r_prime, k0, eps=1e-9):
     return 1j * special.hankel1(0, k0 * R) / 4
 
 def champ_ini(x, y, thet):
-    """
+    
     Champ incident défini pour une onde plane d'angle d'incidence thet.
-    """
+    
     return np.exp(1j * k_in * (np.cos(thet)*x + np.sin(thet)*y))
 
 # Récupération des positions aléatoires des particules
